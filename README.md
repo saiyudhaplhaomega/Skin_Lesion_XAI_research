@@ -2,24 +2,34 @@
 
 Research notebooks and training utilities for the Skin Lesion XAI project.
 
-This repository is intentionally separate from:
+GitHub: https://github.com/saiyudhaplhaomega/Skin_Lesion_XAI_research
 
-- `../Skin_Lesion_Classification_backend` - shared ML code, model artifacts, and future FastAPI service
-- `../Skin_Lesion_Classification_frontend` - Next.js web app
-- `../Skin_Lesion_GRADCAM_Classification` - parent architecture docs and Terraform infrastructure
+This repo is the source of truth for notebooks, RQ1-RQ6 experiments, metrics, figures, and research training scripts. It is intentionally separate from the frontend and backend repos.
+
+## Repo Boundaries
+
+| Repo | Responsibility |
+| --- | --- |
+| `Skin_Lesion_XAI_research` | HAM10000 setup, notebooks, RQ1-RQ6 experiments, figures, metrics, and training helpers |
+| `Skin_Lesion_Classification_backend` | FastAPI inference API, Grad-CAM serving runtime, and backend model artifact loading |
+| `Skin_Lesion_Classification_frontend` | Next.js web app |
+| `Skin_Lesion_GRADCAM_Classification` | Workspace-level docs, Terraform, and production roadmap |
+
+Do not add frontend application code or backend API code here.
 
 ## What This Repo Contains
 
-- HAM10000 setup and sanity checks
-- RQ1-RQ6 explainability notebooks
-- Grad-CAM, Grad-CAM++, EigenCAM, and LayerCAM comparisons
-- Faithfulness, agreement, focus area, entropy, and external-validation analyses
-- Paper figures and CSV metrics under `notebooks/outputs/`
-- Research training scripts for backbone comparison and temporal checkpoints
+- `notebooks/00_setup_and_sanity.ipynb` for dataset setup and baseline checks
+- RQ1-RQ6 notebooks for explainability, faithfulness, backbone comparison, uncertainty, temporal CAMs, and external validation
+- `notebooks/outputs/figures/` for generated figures
+- `notebooks/outputs/metrics/` for generated CSV metrics
+- `train_backbones.py` for backbone comparison training
+- `train_epoch_checkpoints.py` for temporal checkpoint training
+- `research_paths.py` for stable paths to the sibling backend repo
 
-## Expected Folder Layout
+## Expected Workspace Layout
 
-The notebooks expect this repository to sit beside the backend repository:
+The easiest local setup keeps the repos as siblings:
 
 ```text
 Skin_Lesion_GRADCAM_Classification/
@@ -31,11 +41,12 @@ Skin_Lesion_GRADCAM_Classification/
   Skin_Lesion_Classification_frontend/
   Skin_Lesion_XAI_research/
     notebooks/
+    research_paths.py
     train_backbones.py
     train_epoch_checkpoints.py
 ```
 
-You can override the backend location with:
+The research scripts read and write shared ML data/artifacts through the backend repo's `ml/` directory by default. Override that location when needed:
 
 ```powershell
 $env:SKIN_LESION_BACKEND_DIR="C:\path\to\Skin_Lesion_Classification_backend"
@@ -59,5 +70,8 @@ make train-backbones-full
 make train-checkpoints
 ```
 
-Model checkpoints and HAM10000 processed data are stored in the backend repo under `ml/outputs/` and `ml/data/processed/`.
-# Skin_Lesion_XAI_research
+## Outputs And Git Hygiene
+
+Review generated outputs before pushing. Do not commit private datasets, patient-linked images, `.env` files, virtual environments, caches, or large checkpoints unless you intentionally decide that a file belongs in the research repo.
+
+The `.gitignore` already excludes `skin-lesion-env/`, Python caches, notebook checkpoints, environment files, and `mlruns/`.

@@ -26,12 +26,9 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from research_paths import METADATA_PATH, MODEL_DIR
+
 # ─── Paths ───────────────────────────────────────────────────────────────────
-SCRIPT_DIR  = Path(__file__).parent
-BACKEND_DIR = SCRIPT_DIR.parent / "Skin_Lesion_Classification_backend"
-ML_DIR      = BACKEND_DIR / "ml"
-METADATA_PATH = ML_DIR / "data" / "processed" / "metadata_with_paths.csv"
-MODEL_DIR   = ML_DIR / "outputs" / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Config ──────────────────────────────────────────────────────────────────

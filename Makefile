@@ -1,4 +1,4 @@
-# Frontend / research notebooks Makefile.
+# Research notebooks Makefile.
 
 VENV_DIR := skin-lesion-env
 
@@ -20,7 +20,7 @@ help:
 	@echo "  install              - Install production packages only (requirements.txt)"
 	@echo "  install-dev          - Re-sync dev packages (requirements-dev.txt)"
 	@echo "  register-kernel      - Register Jupyter kernel for VS Code"
-	@echo "  run-notebook         - Launch Jupyter Lab"
+	@echo "  run-notebook         - Launch Jupyter Lab in notebooks/"
 	@echo "  train-backbones      - Train EfficientNet-B2 + MobileNetV2 (2 epochs, quick)"
 	@echo "  train-backbones-full - Train EfficientNet-B2 + MobileNetV2 (15 epochs, full)"
 	@echo "  train-checkpoints    - Train ResNet50 saving a checkpoint per epoch (for RQ5)"
@@ -35,10 +35,10 @@ setup:
 	@echo "Done. Run: make register-kernel"
 
 install:
-	$(VENV_PYTHON) -m pip install -r requirements.txt
+	$(VENV_PYTHON) -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements.txt
 
 install-dev:
-	$(VENV_PYTHON) -m pip install -r requirements-dev.txt
+	$(VENV_PYTHON) -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements-dev.txt
 
 register-kernel:
 	$(VENV_PYTHON) -m ipykernel install --user --name=skin-lesion-env --display-name="Skin Lesion (shared)"

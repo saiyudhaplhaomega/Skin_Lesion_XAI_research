@@ -1,8 +1,8 @@
 # ML core - what every researcher needs to run the notebooks.
 # Keep this lean. No jupyter, no plotting extras - those go in requirements-dev.txt.
 
-torch==2.9.0
-torchvision==0.24.0
+torch==2.6.0
+torchvision==0.21.0
 timm==1.0.26
 albumentations==1.4.24
 opencv-python==4.10.0.84

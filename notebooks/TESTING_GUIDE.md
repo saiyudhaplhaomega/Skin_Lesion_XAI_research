@@ -11,7 +11,7 @@
 
 ```bash
 # 1. Navigate to notebooks
-cd Skin_Lesion_Classification_frontend/notebooks
+cd Skin_Lesion_XAI_research/notebooks
 
 # 2. Start Jupyter
 jupyter lab

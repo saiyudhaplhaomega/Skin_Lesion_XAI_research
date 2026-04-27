@@ -30,11 +30,9 @@ from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-SCRIPT_DIR  = Path(__file__).parent
-BACKEND_DIR = SCRIPT_DIR.parent / "Skin_Lesion_Classification_backend"
-ML_DIR      = BACKEND_DIR / "ml"
-METADATA_PATH = ML_DIR / "data" / "processed" / "metadata_with_paths.csv"
-CKPT_DIR    = ML_DIR / "outputs" / "models" / "checkpoints"
+from research_paths import CHECKPOINT_DIR, METADATA_PATH
+
+CKPT_DIR = CHECKPOINT_DIR
 CKPT_DIR.mkdir(parents=True, exist_ok=True)
 
 EPOCHS     = 10

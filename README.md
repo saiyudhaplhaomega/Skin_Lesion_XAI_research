@@ -62,6 +62,25 @@ make run-notebook
 
 Start with `notebooks/00_setup_and_sanity.ipynb`, then run the RQ notebooks.
 
+## Jupyter Kernel Setup
+
+The Makefile creates and registers the notebook kernel:
+
+```bash
+make setup
+make register-kernel
+```
+
+This registers a Jupyter kernel named `skin-lesion-env` with the display name `Skin Lesion (shared)`.
+
+In VS Code or Jupyter Lab, select:
+
+```text
+Skin Lesion (shared)
+```
+
+Use this kernel for all notebooks in `notebooks/`. If the backend repo is not a sibling of this research repo, set `SKIN_LESION_BACKEND_DIR` before launching notebooks.
+
 ## Training Helpers
 
 ```bash

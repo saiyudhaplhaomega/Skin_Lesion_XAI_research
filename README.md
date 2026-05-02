@@ -17,6 +17,26 @@ This repo is the source of truth for notebooks, RQ1-RQ6 experiments, metrics, fi
 
 Do not add frontend application code or backend API code here.
 
+## How Research Supports The Product
+
+The product roadmap uses the research results as evidence for safe product behavior:
+
+- RQ1 and RQ2 justify starting with GradCAM as the primary explanation method.
+- RQ3 shows that model accuracy and explanation focus can diverge, so the product should expose both prediction and explanation quality.
+- RQ4 shows that CAM agreement is not a correctness guarantee.
+- RQ5 supports temporal XAI as exploratory, not a product guarantee.
+- RQ6 shows that external validation can expose overconfidence, poor malignant sensitivity, and explanation failures.
+
+These findings should inform product guardrails:
+
+- always show uncertainty
+- allow users to compare original image and heatmap
+- report failed or zero-CAM explanations honestly
+- avoid clinical-readiness claims
+- recommend professional review for concerning, uncertain, or low-quality cases
+
+Product code for LLM/RAG, image-quality gating, online/offline mode, and UI belongs in the backend/frontend repos, not here.
+
 ## What This Repo Contains
 
 - `notebooks/00_setup_and_sanity.ipynb` for dataset setup and baseline checks
@@ -94,3 +114,5 @@ make train-checkpoints
 Review generated outputs before pushing. Do not commit private datasets, patient-linked images, `.env` files, virtual environments, caches, or large checkpoints unless you intentionally decide that a file belongs in the research repo.
 
 The `.gitignore` already excludes `skin-lesion-env/`, Python caches, notebook checkpoints, environment files, and `mlruns/`.
+
+Large generated cache CSVs, such as full inference row dumps, should stay local unless they are required for a paper table. Prefer summary CSVs and figures for GitHub.

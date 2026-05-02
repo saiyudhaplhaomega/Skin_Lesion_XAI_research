@@ -32,3 +32,6 @@ __pycache__/
 .ipynb_checkpoints/
 *.egg-info/
 mlruns/
+
+# Large generated notebook cache files
+notebooks/outputs/metrics/RQ6_inference_all_datasets.csv

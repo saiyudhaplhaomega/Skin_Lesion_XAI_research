@@ -26,6 +26,9 @@ jupyter lab
 | Order | Notebook | What It Does | Time | Prerequisites |
 |-------|----------|---------------|------|--------------|
 | 0 | `00_setup_and_sanity.ipynb` | Verify environment, data, splits | 5 min | HAM10000 data downloaded |
+| 1A | `01_training_ham10000_resnet50_baseline.ipynb` | Optional fresh HAM10000 binary ResNet50 training with patient-aware split, weighted sampling, OneCycleLR, ROC-AUC | 30 min-hours | HAM10000 metadata and images |
+| 1B | `02_training_siim_isic2020_binary.ipynb` | Optional SIIM-ISIC 2020 binary melanoma training extension with patient-level split and imbalance handling | hours | SIIM-ISIC 2020 local data |
+| 1C | `03_xai_lime_shap_extension.ipynb` | Optional LIME/SHAP research comparison plan beside Grad-CAM | 5 min setup; runtime varies | Optional `lime` and `shap` packages |
 | 1 | `RQ1_cam_variant_comparison.ipynb` | Compare CAM methods by focus quality | 20–40 min | ResNet50 trained |
 | 2 | `RQ3_backbone_xai_quality.ipynb` | Backbone architecture vs XAI quality | 30–50 min | All 3 models trained |
 | 3 | `RQ4_agreement_vs_uncertainty.ipynb` | Does method agreement predict errors? | 20–30 min | ResNet50 trained |
@@ -33,6 +36,44 @@ jupyter lab
 | 5 | `RQ5_temporal_xai.ipynb` | How attention evolves during training | 15–30 min | Training checkpoints saved |
 | 6 | `RQ6_external_validation.ipynb` | External validation across diverse populations | 30–45 min | ISIC 2020 or external dataset |
 | Final | `PAPER_RESULTS_TABLE.ipynb` | Compile all results into paper tables | 2 min | All above notebooks run |
+| Addendum | `PAPER_RESULTS_TRAINING_ADDENDUM.ipynb` | Summarize optional `TRAINING_*.csv` outputs into a paper addendum table | 1 min | `01_` or `02_` training notebook outputs |
+
+---
+
+## Training Notebooks (`01_` and `02_`)
+
+These notebooks are optional and separate from the existing RQ notebooks.
+
+Use `01_training_ham10000_resnet50_baseline.ipynb` when you need a fresh HAM10000 binary baseline with:
+- patient-aware splitting when `lesion_id` or `patient_id` exists
+- `WeightedRandomSampler` for class imbalance
+- ResNet50 with `BCEWithLogitsLoss`
+- AdamW + OneCycleLR
+- ROC-AUC, accuracy, balanced accuracy, and checkpoint export
+
+Use `02_training_siim_isic2020_binary.ipynb` when you want to extend training evidence to SIIM-ISIC 2020:
+- expects local data under `Skin_Lesion_XAI_research/data/external/siim_isic_2020/`
+- requires `train-metadata.csv` with `isic_id`, `patient_id`, and `target`
+- compatible Kaggle layout: `nischaydnk/isic-2020-jpg-224x224-resized`
+- uses `GroupShuffleSplit` on `patient_id` to prevent patient leakage
+- writes `outputs/metrics/TRAINING_siim_isic2020_resnet50_binary.csv`
+
+Skip this notebook until the SIIM data is downloaded locally. Continue with `01_training_ham10000_resnet50_baseline.ipynb` and the RQ notebooks if you only need the HAM10000 research flow.
+
+Do not compare HAM10000 and SIIM-ISIC metrics without clearly stating the dataset, label definition, and split protocol.
+
+---
+
+## Optional LIME/SHAP Extension (`03_xai_lime_shap_extension.ipynb`)
+
+This notebook adds a research-only comparison path inspired by third-party XAI projects. Keep Grad-CAM as the primary production explanation method.
+
+Use LIME/SHAP only to answer research questions such as:
+- Do perturbation-based explanations agree with Grad-CAM?
+- Are LIME/SHAP explanations stable enough for this image domain?
+- How much slower are they per image?
+
+Do not wire LIME/SHAP into the backend or frontend until runtime, stability, and safety-language constraints are validated.
 
 ---
 
@@ -386,7 +427,16 @@ Place ISIC 2020 metadata at `../Skin_Lesion_Classification_backend/ml/data/proce
 
 ## Output Files
 
-All outputs are saved relative to `notebooks/`:
+All outputs are saved relative to `notebooks/`.
+
+The optional training and addendum notebooks write:
+
+- `outputs/metrics/TRAINING_ham10000_resnet50_baseline.csv`
+- `outputs/metrics/TRAINING_siim_isic2020_resnet50_binary.csv`
+- `outputs/metrics/XAI_lime_shap_extension_plan.csv`
+- `outputs/metrics/PAPER_training_addendum.csv`
+
+The RQ notebooks write:
 
 ```
 notebooks/
@@ -432,3 +482,5 @@ notebooks/
 ## After All Notebooks Complete
 
 Run `PAPER_RESULTS_TABLE.ipynb` to compile all results into paper-ready tables with LaTeX export.
+
+If you ran the optional training notebooks, run `PAPER_RESULTS_TRAINING_ADDENDUM.ipynb` after `PAPER_RESULTS_TABLE.ipynb`. Keep it as a separate paper addendum so the main RQ1-RQ6 results remain unchanged.

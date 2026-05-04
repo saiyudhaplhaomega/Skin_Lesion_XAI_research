@@ -1,0 +1,4 @@
+method,status,production_candidate,notes
+GradCAM,primary,True,Already evaluated in RQ1/RQ2.
+LIME,optional_research,False,Useful for local superpixel perturbation comparison; slower and less stable.
+SHAP,optional_research,False,Useful for attribution comparison; expensive for images.

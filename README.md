@@ -40,7 +40,11 @@ Product code for LLM/RAG, image-quality gating, online/offline mode, and UI belo
 ## What This Repo Contains
 
 - `notebooks/00_setup_and_sanity.ipynb` for dataset setup and baseline checks
+- `notebooks/01_training_ham10000_resnet50_baseline.ipynb` for a HAM10000 ResNet50 training baseline with patient-aware splitting, weighted sampling, OneCycleLR, and ROC-AUC tracking
+- `notebooks/02_training_siim_isic2020_binary.ipynb` for a SIIM-ISIC 2020 binary melanoma training extension with patient-level splitting and imbalance handling
+- `notebooks/03_xai_lime_shap_extension.ipynb` for optional LIME/SHAP research comparison beside the CAM-family notebooks
 - RQ1-RQ6 notebooks for explainability, faithfulness, backbone comparison, uncertainty, temporal CAMs, and external validation
+- `notebooks/PAPER_RESULTS_TRAINING_ADDENDUM.ipynb` for summarizing optional training metrics without changing the main paper-results notebook
 - `notebooks/outputs/figures/` for generated figures
 - `notebooks/outputs/metrics/` for generated CSV metrics
 - `train_backbones.py` for backbone comparison training
@@ -80,7 +84,7 @@ make register-kernel
 make run-notebook
 ```
 
-Start with `notebooks/00_setup_and_sanity.ipynb`, then run the RQ notebooks.
+Start with `notebooks/00_setup_and_sanity.ipynb`. If you need fresh training evidence, run the `01_` and `02_` training notebooks before the RQ notebooks. Run `PAPER_RESULTS_TABLE.ipynb` for the main RQ1-RQ6 paper table and `PAPER_RESULTS_TRAINING_ADDENDUM.ipynb` only for the extra training-protocol addendum.
 
 ## Jupyter Kernel Setup
 

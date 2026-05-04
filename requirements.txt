@@ -1,5 +1,5 @@
 # ML core - what every researcher needs to run the notebooks.
-# Keep this lean. No jupyter, no plotting extras - those go in requirements-dev.txt.
+# Keep UI/runtime notebook tools in requirements-dev.txt.
 
 torch==2.6.0
 torchvision==0.21.0
@@ -9,6 +9,8 @@ opencv-python==4.10.0.84
 numpy==2.2.2
 pandas==2.2.3
 scikit-learn==1.6.1
+scipy==1.15.1
 Pillow==11.1.0
 tqdm==4.67.1
 kagglehub>=0.3.0
+grad-cam==1.5.4

@@ -12,7 +12,7 @@ Runtime: ~20-30 min per model on GPU (RTX 4070).
 
 import argparse
 import copy
-import sys
+import os
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +20,7 @@ import pandas as pd
 import timm
 import torch
 import torch.nn as nn
+from torch.amp import GradScaler, autocast
 import torchvision.transforms as T
 from PIL import Image
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -38,6 +39,47 @@ BATCH_SIZE = 32
 IMG_SIZE   = 224
 LR         = 1e-4
 DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEFAULT_NUM_WORKERS = 0 if os.name == "nt" else 4
+
+
+class EarlyStopping:
+    def __init__(
+        self,
+        patience: int = 5,
+        min_delta: float = 0.001,
+        checkpoint_path: Path | str = MODEL_DIR / "best.pth",
+    ) -> None:
+        self.patience = patience
+        self.min_delta = min_delta
+        self.checkpoint_path = Path(checkpoint_path)
+        self.best_score = -float("inf")
+        self.counter = 0
+        self.should_stop = False
+        self.best_state: dict[str, torch.Tensor] | None = None
+
+    def step(self, val_auc: float, model: nn.Module) -> bool:
+        if val_auc > self.best_score + self.min_delta:
+            self.best_score = val_auc
+            self.counter = 0
+            self.best_state = copy.deepcopy(model.state_dict())
+            self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            return True
+
+        self.counter += 1
+        if self.counter >= self.patience:
+            self.should_stop = True
+        return False
+
+
+def dataloader_kwargs(num_workers: int) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "num_workers": num_workers,
+        "pin_memory": DEVICE.type == "cuda",
+    }
+    if num_workers > 0:
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = 2
+    return kwargs
 
 
 class HAM10000Dataset(Dataset):
@@ -84,14 +126,29 @@ def build_splits():
     return df[df["_split"] == "train"], df[df["_split"] == "val"], df[df["_split"] == "test"]
 
 
-def train_model(model_name, train_df, val_df, test_df, epochs):
-    out_path = MODEL_DIR / f"{model_name}_best.pth"
-    if out_path.exists():
+def train_model(
+    model_name,
+    train_df,
+    val_df,
+    test_df,
+    epochs,
+    output_dir: Path,
+    num_workers: int,
+    amp_enabled: bool,
+    patience: int,
+    min_delta: float,
+    force: bool,
+    pretrained: bool,
+):
+    out_path = output_dir / f"{model_name}_best.pth"
+    if out_path.exists() and not force:
         print(f"\n[{model_name}] Already trained - skipping ({out_path})")
         return
 
     print(f"\n{'='*60}")
-    print(f"Training {model_name} for {epochs} epochs on {DEVICE}")
+    print(f"Training {model_name} for up to {epochs} epochs on {DEVICE}")
+    print(f"AMP enabled: {amp_enabled and DEVICE.type == 'cuda'}")
+    print(f"DataLoader workers: {num_workers}")
     print(f"{'='*60}")
 
     # class weight for imbalanced data (same as resnet50 training)
@@ -100,28 +157,47 @@ def train_model(model_name, train_df, val_df, test_df, epochs):
     pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32).to(DEVICE)
     print(f"pos_weight: {pos_weight.item():.2f}  (neg={n_neg}, pos={n_pos})")
 
-    train_loader = DataLoader(HAM10000Dataset(train_df, augment=True),  batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
-    val_loader   = DataLoader(HAM10000Dataset(val_df,   augment=False), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    test_loader  = DataLoader(HAM10000Dataset(test_df,  augment=False), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    train_loader = DataLoader(
+        HAM10000Dataset(train_df, augment=True),
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        **dataloader_kwargs(num_workers),
+    )
+    val_loader = DataLoader(
+        HAM10000Dataset(val_df, augment=False),
+        batch_size=BATCH_SIZE * 2,
+        shuffle=False,
+        **dataloader_kwargs(num_workers),
+    )
+    test_loader = DataLoader(
+        HAM10000Dataset(test_df, augment=False),
+        batch_size=BATCH_SIZE * 2,
+        shuffle=False,
+        **dataloader_kwargs(num_workers),
+    )
 
-    model = timm.create_model(model_name, pretrained=True, num_classes=1).to(DEVICE)
+    model = timm.create_model(model_name, pretrained=pretrained, num_classes=1).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
-    best_val_auc = 0.0
-    best_state   = None
+    scaler = GradScaler("cuda", enabled=amp_enabled and DEVICE.type == "cuda")
+    stopper = EarlyStopping(patience=patience, min_delta=min_delta, checkpoint_path=out_path)
 
     for epoch in range(epochs):
         # train
         model.train()
         train_loss = 0.0
         for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [train]", leave=False):
-            images, labels = images.to(DEVICE), labels.to(DEVICE).unsqueeze(1)
-            optimizer.zero_grad()
-            loss = criterion(model(images), labels)
-            loss.backward()
-            optimizer.step()
+            images = images.to(DEVICE, non_blocking=True)
+            labels = labels.to(DEVICE, non_blocking=True).unsqueeze(1)
+            optimizer.zero_grad(set_to_none=True)
+            with autocast(device_type=DEVICE.type, enabled=amp_enabled and DEVICE.type == "cuda"):
+                loss = criterion(model(images), labels)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
             train_loss += loss.item()
         train_loss /= len(train_loader)
 
@@ -130,27 +206,32 @@ def train_model(model_name, train_df, val_df, test_df, epochs):
         logits_all, labels_all = [], []
         with torch.no_grad():
             for images, labels in val_loader:
-                logits_all.append(model(images.to(DEVICE)).cpu())
+                with autocast(device_type=DEVICE.type, enabled=amp_enabled and DEVICE.type == "cuda"):
+                    logits_all.append(model(images.to(DEVICE, non_blocking=True)).cpu())
                 labels_all.append(labels)
         logits_all = torch.cat(logits_all)
         labels_all = torch.cat(labels_all)
         val_auc = roc_auc_score(labels_all.numpy(), torch.sigmoid(logits_all).numpy())
         scheduler.step()
 
-        marker = " *" if val_auc > best_val_auc else ""
+        improved = stopper.step(val_auc, model)
+        marker = " *" if improved else ""
         print(f"Epoch {epoch+1:2d}: train_loss={train_loss:.4f}  val_auc={val_auc:.4f}{marker}")
 
-        if val_auc > best_val_auc:
-            best_val_auc = val_auc
-            best_state   = copy.deepcopy(model.state_dict())
+        if stopper.should_stop:
+            print(f"Early stopping triggered after {epoch + 1} epochs. Best val_auc={stopper.best_score:.4f}")
+            break
 
     # test eval
-    model.load_state_dict(best_state)
+    if stopper.best_state is None:
+        raise RuntimeError("No best model state was captured during training.")
+    model.load_state_dict(stopper.best_state)
     model.eval()
     preds_all, labels_all = [], []
     with torch.no_grad():
         for images, labels in tqdm(test_loader, desc="Test eval", leave=False):
-            preds_all.extend(torch.sigmoid(model(images.to(DEVICE))).cpu().numpy().flatten())
+            with autocast(device_type=DEVICE.type, enabled=amp_enabled and DEVICE.type == "cuda"):
+                preds_all.extend(torch.sigmoid(model(images.to(DEVICE, non_blocking=True))).cpu().numpy().flatten())
             labels_all.extend(labels.numpy())
     preds_all  = np.array(preds_all)
     labels_all = np.array(labels_all).astype(int)
@@ -159,12 +240,14 @@ def train_model(model_name, train_df, val_df, test_df, epochs):
     print(f"\nTest AUC={test_auc:.4f}  Acc={test_acc:.4f}")
 
     torch.save({
-        "model_state_dict": best_state,
-        "val_auc":          best_val_auc,
+        "model_state_dict": stopper.best_state,
+        "val_auc":          stopper.best_score,
         "test_auc":         test_auc,
         "test_acc":         test_acc,
         "epochs":           epochs,
         "pos_weight":       pos_weight.item(),
+        "amp_enabled":      amp_enabled and DEVICE.type == "cuda",
+        "num_workers":      num_workers,
     }, out_path)
     print(f"Saved: {out_path}")
 
@@ -174,6 +257,14 @@ def main():
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS,
                         choices=["efficientnet_b2", "mobilenetv2_100", "resnet50"])
     parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument("--min-delta", type=float, default=0.001)
+    parser.add_argument("--num-workers", type=int, default=DEFAULT_NUM_WORKERS)
+    parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--no-pretrained", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing model outputs.")
+    parser.add_argument("--limit-samples", type=int, help="Use a small balanced split for smoke testing.")
+    parser.add_argument("--output-dir", type=Path, default=MODEL_DIR)
     args = parser.parse_args()
 
     print(f"Device: {DEVICE}")
@@ -181,12 +272,31 @@ def main():
     print(f"Epochs: {args.epochs}")
 
     train_df, val_df, test_df = build_splits()
+    if args.limit_samples:
+        per_split = max(2, args.limit_samples)
+        train_df = train_df.groupby("label", group_keys=False).head(per_split)
+        val_df = val_df.groupby("label", group_keys=False).head(per_split)
+        test_df = test_df.groupby("label", group_keys=False).head(per_split)
     print(f"Split: train={len(train_df)} val={len(val_df)} test={len(test_df)}")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
 
     for model_name in args.models:
-        train_model(model_name, train_df, val_df, test_df, args.epochs)
+        train_model(
+            model_name,
+            train_df,
+            val_df,
+            test_df,
+            args.epochs,
+            args.output_dir,
+            args.num_workers,
+            not args.no_amp,
+            args.patience,
+            args.min_delta,
+            args.force,
+            not args.no_pretrained,
+        )
 
-    print("\nAll done. Models saved to:", MODEL_DIR)
+    print("\nAll done. Models saved to:", args.output_dir)
 
 
 if __name__ == "__main__":

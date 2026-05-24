@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import copy
+import os
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ import pandas as pd
 import timm
 import torch
 import torch.nn as nn
+from torch.amp import GradScaler, autocast
 import torchvision.transforms as T
 from PIL import Image
 from sklearn.metrics import roc_auc_score
@@ -32,14 +34,23 @@ from tqdm import tqdm
 
 from research_paths import CHECKPOINT_DIR, METADATA_PATH
 
-CKPT_DIR = CHECKPOINT_DIR
-CKPT_DIR.mkdir(parents=True, exist_ok=True)
-
 EPOCHS     = 10
 BATCH_SIZE = 32
 IMG_SIZE   = 224
 LR         = 1e-4
 DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEFAULT_NUM_WORKERS = 0 if os.name == "nt" else 4
+
+
+def dataloader_kwargs(num_workers: int) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "num_workers": num_workers,
+        "pin_memory": DEVICE.type == "cuda",
+    }
+    if num_workers > 0:
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = 2
+    return kwargs
 
 
 class HAM10000Dataset(Dataset):
@@ -90,19 +101,31 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--force", action="store_true",
                         help="Overwrite existing checkpoints")
+    parser.add_argument("--num-workers", type=int, default=DEFAULT_NUM_WORKERS)
+    parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--no-pretrained", action="store_true")
+    parser.add_argument("--limit-samples", type=int, help="Use a small balanced split for smoke testing.")
+    parser.add_argument("--checkpoint-dir", default=CHECKPOINT_DIR, type=Path)
     args = parser.parse_args()
+    args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # skip if all checkpoints already exist
-    existing = sorted(CKPT_DIR.glob("resnet50_epoch*.pth"))
+    existing = sorted(args.checkpoint_dir.glob("resnet50_epoch*.pth"))
     if existing and not args.force:
-        print(f"Found {len(existing)} existing checkpoints in {CKPT_DIR}")
+        print(f"Found {len(existing)} existing checkpoints in {args.checkpoint_dir}")
         print("Use --force to retrain from scratch.")
         return
 
     print(f"Device: {DEVICE}")
-    print(f"Saving {args.epochs} epoch checkpoints to {CKPT_DIR}")
+    print(f"AMP enabled: {not args.no_amp and DEVICE.type == 'cuda'}")
+    print(f"DataLoader workers: {args.num_workers}")
+    print(f"Saving {args.epochs} epoch checkpoints to {args.checkpoint_dir}")
 
     train_df, val_df = build_splits()
+    if args.limit_samples:
+        per_split = max(2, args.limit_samples)
+        train_df = train_df.groupby("label", group_keys=False).head(per_split)
+        val_df = val_df.groupby("label", group_keys=False).head(per_split)
     print(f"Train: {len(train_df)}  Val: {len(val_df)}")
 
     n_pos = train_df["label"].sum()
@@ -111,25 +134,32 @@ def main():
     print(f"pos_weight: {pos_weight.item():.2f}")
 
     train_loader = DataLoader(HAM10000Dataset(train_df, augment=True),
-                              batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+                              batch_size=BATCH_SIZE, shuffle=True, **dataloader_kwargs(args.num_workers))
     val_loader   = DataLoader(HAM10000Dataset(val_df, augment=False),
-                              batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+                              batch_size=BATCH_SIZE * 2, shuffle=False, **dataloader_kwargs(args.num_workers))
 
-    model = timm.create_model("resnet50", pretrained=True, num_classes=1).to(DEVICE)
+    amp_enabled = not args.no_amp
+    model = timm.create_model("resnet50", pretrained=not args.no_pretrained, num_classes=1).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    scaler = GradScaler("cuda", enabled=amp_enabled and DEVICE.type == "cuda")
 
     for epoch in range(1, args.epochs + 1):
         # train
         model.train()
         train_loss = 0.0
         for images, labels in tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs} [train]", leave=False):
-            images, labels = images.to(DEVICE), labels.to(DEVICE).unsqueeze(1)
-            optimizer.zero_grad()
-            loss = criterion(model(images), labels)
-            loss.backward()
-            optimizer.step()
+            images = images.to(DEVICE, non_blocking=True)
+            labels = labels.to(DEVICE, non_blocking=True).unsqueeze(1)
+            optimizer.zero_grad(set_to_none=True)
+            with autocast(device_type=DEVICE.type, enabled=amp_enabled and DEVICE.type == "cuda"):
+                loss = criterion(model(images), labels)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
             train_loss += loss.item()
         train_loss /= len(train_loader)
 
@@ -138,7 +168,8 @@ def main():
         logits_all, labels_all = [], []
         with torch.no_grad():
             for images, labels in val_loader:
-                logits_all.append(model(images.to(DEVICE)).cpu())
+                with autocast(device_type=DEVICE.type, enabled=amp_enabled and DEVICE.type == "cuda"):
+                    logits_all.append(model(images.to(DEVICE, non_blocking=True)).cpu())
                 labels_all.append(labels)
         val_auc = roc_auc_score(
             torch.cat(labels_all).numpy(),
@@ -146,16 +177,18 @@ def main():
         )
         scheduler.step()
 
-        ckpt_path = CKPT_DIR / f"resnet50_epoch{epoch:02d}.pth"
+        ckpt_path = args.checkpoint_dir / f"resnet50_epoch{epoch:02d}.pth"
         torch.save({
             "model_state_dict": copy.deepcopy(model.state_dict()),
             "val_auc":          val_auc,
             "epoch":            epoch,
             "pos_weight":       pos_weight.item(),
+            "amp_enabled":      amp_enabled and DEVICE.type == "cuda",
+            "num_workers":      args.num_workers,
         }, ckpt_path)
         print(f"Epoch {epoch:2d}: train_loss={train_loss:.4f}  val_auc={val_auc:.4f}  -> saved {ckpt_path.name}")
 
-    print(f"\nDone. {args.epochs} checkpoints saved to {CKPT_DIR}")
+    print(f"\nDone. {args.epochs} checkpoints saved to {args.checkpoint_dir}")
 
 
 if __name__ == "__main__":

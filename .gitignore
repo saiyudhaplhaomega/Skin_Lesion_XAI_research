@@ -37,6 +37,8 @@ mlruns/
 data/
 calibration_data/
 outputs/models/
+outputs/smoke-models/
+outputs/smoke-checkpoints/
 *.pth
 *.pt
 

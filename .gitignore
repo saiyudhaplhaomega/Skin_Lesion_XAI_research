@@ -35,6 +35,7 @@ mlruns/
 
 # Local datasets and model checkpoints
 data/
+calibration_data/
 outputs/models/
 *.pth
 *.pt
